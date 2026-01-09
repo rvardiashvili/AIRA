@@ -1,0 +1,9 @@
+PyQt6
+ollama
+pynput
+markdown
+duckduckgo-search
+requests
+pyautogui
+pillow
+psutil

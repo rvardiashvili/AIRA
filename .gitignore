@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+.env
+.DS_Store
+unused_icons/
+config.json
+knowledge_base/vector_db.pkl
+agenda.txt
+agenda_backup.txt
+*.log
