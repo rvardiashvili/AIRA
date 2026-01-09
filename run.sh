@@ -1,3 +1,5 @@
 #!/bin/bash
+cd "$(dirname "$0")"
 source venv/bin/activate
-python main.py
+export PYTHONPATH=$PYTHONPATH:.
+python -m src.main

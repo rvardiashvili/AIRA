@@ -2,10 +2,32 @@ import ollama
 import re
 import json
 from PyQt6.QtCore import QThread, pyqtSignal
-from tools import (DDGSearch, WeatherFetcher, CalendarReader, 
-                   FileReader, ScreenReader, SystemStats, SystemControl, ShellExecutor, 
-                   AppLauncher, CodeExecutor, WebScraper, MediaController, KnowledgeBase,
-                   ClipboardTool, ProcessManager, NetworkInfo, MathEvaluator, UserInfo, DateTimer)
+from src.core.memory import KnowledgeBase
+from src.core.config import Config
+from src.core.history import HistoryManager
+from src.tools import (
+    DDGSearch,
+    WeatherFetcher,
+    CalendarReader,
+    FileReader,
+    ScreenReader,
+    SystemStats,
+    SystemControl,
+    ShellExecutor,
+    AppLauncher,
+    CodeExecutor,
+    WebScraper,
+    MediaController,
+    ClipboardTool,
+    ProcessManager,
+    NetworkInfo,
+    MathEvaluator,
+    UserInfo,
+    NoteTaker,
+    TimerTool,
+    DateTimer,
+    DiskIndexer,
+)
 
 class OllamaWorker(QThread):
     response_received = pyqtSignal(str)
@@ -19,13 +41,28 @@ class OllamaWorker(QThread):
         super().__init__()
         self.model = model
         self.prompt = ""
-        self.history = []
+        self.config = Config.load()
+        
+        # Initialize Session via HistoryManager (SQLite)
+        self.session = HistoryManager.get_current_session()
+        
         self._abort = False 
+        
+        user_profile = self.config.get("user_profile", {})
+        user_context = ""
+        if user_profile.get("name"):
+            user_context += f"User Name: {user_profile['name']}. "
+        if user_profile.get("role"):
+            user_context += f"User Role: {user_profile['role']}. "
+        if user_profile.get("interests"):
+            user_context += f"User Interests: {user_profile['interests']}. "
+
         self.default_system_prompt = (
-            "You are AIRA, a smart desktop assistant running locally. Your actual toolkit includes:\n"
+            f"You are AIRA, a smart desktop assistant running locally. {user_context}\n"
+            "Your actual toolkit includes:\n"
             "🔧 System: App Launcher, Volume/Brightness Control, System Stats (CPU/RAM), Process Manager (List/Kill), Clipboard Access, Network Info, and Terminal/Python execution.\n"
-            "🤖 Smart Features: Semantic Memory (RAG) and Vision (Screenshots).\n"
-            "🔗 Web & Info: DuckDuckGo Search, Weather, Web Scraping, Agenda reading, Date & Time, and Safe Math.\n\n"
+            "🤖 Smart Features: Semantic Memory (RAG), Vision (Screenshots), and Disk Indexing.\n"
+            "🔗 Web & Info: DuckDuckGo Search, Weather, Web Scraping, Agenda reading, Date & Time, Safe Math, Notes, and Timers.\n\n"
             "IMPORTANT: You do NOT have built-in integrations for Email, Cloud Storage, VPNs, or Browser Extensions. "
             "You also do NOT have Voice or TTS capabilities. "
             "Do not claim to have these features. Stick to your actual tools."
@@ -54,12 +91,18 @@ class OllamaWorker(QThread):
             {'type': 'function', 'function': {'name': 'get_ip_info', 'description': 'Get local and public IP address.', 'parameters': {'type': 'object', 'properties': {}}}},
             {'type': 'function', 'function': {'name': 'calculate_math', 'description': 'Evaluate a math expression safely.', 'parameters': {'type': 'object', 'properties': {'expression': {'type': 'string'}}, 'required': ['expression']}}},
             {'type': 'function', 'function': {'name': 'get_user_info', 'description': 'Get current user and system info.', 'parameters': {'type': 'object', 'properties': {}}}},
+            {'type': 'function', 'function': {'name': 'add_note', 'description': 'Add a note to agenda.', 'parameters': {'type': 'object', 'properties': {'content': {'type': 'string'}}, 'required': ['content']}}},
+            {'type': 'function', 'function': {'name': 'set_timer', 'description': 'Set a system timer.', 'parameters': {'type': 'object', 'properties': {'duration_seconds': {'type': 'integer'}, 'message': {'type': 'string'}}, 'required': ['duration_seconds']}}},
+            {'type': 'function', 'function': {'name': 'index_directory', 'description': 'Index a folder on disk into memory.', 'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}, 'recursive': {'type': 'boolean'}}, 'required': ['path']}}},
+            {'type': 'function', 'function': {'name': 'index_structure', 'description': 'Index only file names and folder structure (very fast).', 'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}}, 'required': ['path']}}},
         ]
 
     def set_prompt(self, prompt, history=None):
         self.prompt = prompt
-        if history is not None: self.history = history
         self._abort = False
+
+    def set_system_prompt(self, prompt_text):
+        self.system_prompt = prompt_text
 
     def set_model(self, model_name):
         self.model = model_name
@@ -72,21 +115,34 @@ class OllamaWorker(QThread):
             return []
 
     def clear_history(self):
-        self.history = []
+        self.session = HistoryManager.start_new_session()
+
+    def reload_history(self):
+        self.session = HistoryManager.get_current_session()
+
+    @property
+    def history(self):
+        if self.session:
+            return self.session.messages
+        return []
 
     def stop(self):
         self._abort = True
 
     def run(self):
         try:
-            # 1. Automatic RAG: Fetch relevant context with UI feedback
             if self._abort: return
             self.tool_started.emit("Memory Retrieval")
             semantic_context = KnowledgeBase.get_context(self.prompt)
             self.tool_finished.emit("Memory Retrieval", semantic_context if semantic_context else "Searching knowledge base... (No relevant snippets found)")
             
+            self.reload_history()
+            
             current_messages = [{'role': 'system', 'content': self.system_prompt + semantic_context}]
-            current_messages.extend(self.history)
+            if self.session and self.session.messages:
+                for msg in self.session.messages:
+                    current_messages.append(msg.to_dict())
+            
             current_messages.append({'role': 'user', 'content': self.prompt})
 
             max_turns = 10
@@ -151,6 +207,10 @@ class OllamaWorker(QThread):
                         elif name == 'get_ip_info': result = NetworkInfo.get_ip_info()
                         elif name == 'calculate_math': result = MathEvaluator.calculate(args.get('expression', ''))
                         elif name == 'get_user_info': result = UserInfo.get_info()
+                        elif name == 'add_note': result = NoteTaker.add_note(args.get('content', ''))
+                        elif name == 'set_timer': result = TimerTool.set_timer(args.get('duration_seconds', 0), args.get('message', 'Timer done!'))
+                        elif name == 'index_directory': result = DiskIndexer.index_directory(args.get('path', ''), args.get('recursive', True))
+                        elif name == 'index_structure': result = DiskIndexer.index_structure(args.get('path', ''))
                         
                         self.tool_finished.emit(name, str(result))
                         current_messages.append({'role': 'tool', 'content': str(result), 'name': name})
@@ -170,10 +230,8 @@ class OllamaWorker(QThread):
                         full_text += content
                         self.response_received.emit(content)
                     
-                    # 2. Automatic Indexing with Summarization
                     if not self._abort:
                         self.tool_started.emit("Memory Processing")
-                        # Generate concise summary before saving to prevent bloat
                         summary_prompt = f"Summarize this interaction in ONE extremely concise sentence for long-term memory:\nUser: {self.prompt}\nAI: {full_text}"
                         try:
                             sum_res = ollama.generate(model=self.model, prompt=summary_prompt)
@@ -184,8 +242,9 @@ class OllamaWorker(QThread):
                             KnowledgeBase.auto_index(f"User: {self.prompt}\nAI: {full_text[:200]}")
                             self.tool_finished.emit("Memory Processing", "Interaction indexed.")
                     
-                    self.history.append({'role': 'user', 'content': self.prompt})
-                    self.history.append({'role': 'assistant', 'content': full_text})
+                    HistoryManager.add_message('user', self.prompt)
+                    HistoryManager.add_message('assistant', full_text)
+                    self.reload_history()
                     self.finished_streaming.emit()
                     break
 

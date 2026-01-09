@@ -1,35 +1,60 @@
-# Ollama Qt Client
+# AIRA (AI Responsive Assistant) 🤖
 
-A minimalist, Spotlight-like AI assistant using local Ollama models.
+AIRA is a minimalist, high-performance desktop AI assistant for Linux, built with **Python**, **PyQt6**, and **Ollama**. It integrates deeply with your system to provide local AI power at your fingertips.
 
-## Features
-- **Global Hotkey:** Press `Super+Space` (Windows Key + Space) to toggle the chat window anywhere.
-- **Voice Control:** Click the microphone icon to speak your prompt.
-- **Local AI:** Uses your local Ollama instance (default model: `llama3.2`).
-- **System Tray:** Runs in the background with a tray icon.
+## 🚀 Key Features
 
-## Requirements
-- Linux (X11 preferred for global hotkeys, Wayland support varies).
-- [Ollama](https://ollama.com/) installed and running (`ollama serve`).
-- Python 3.12+
+*   **⚡ Instant Access:** Summon AIRA anywhere with `Super+Space`.
+*   **🔒 100% Local:** Powered by Ollama. Your data never leaves your machine.
+*   **🧠 Advanced RAG (ChromaDB):** Advanced semantic memory that understands your files and past conversations.
+*   **💾 Robust History:** SQLite-backed chat sessions. Resume any past conversation instantly.
+*   **🔌 System Integration:**
+    *   **File Manager Extensions:** Right-click any folder in Nautilus, Nemo, or Dolphin to index it.
+    *   **Disk Indexer:** Recursively index your projects and documents.
+    *   **Tool Power:** App launcher, process manager, clipboard control, and network tools.
+*   **🎨 Customization:**
+    *   **Themes:** Dark, Light, and Nord themes that follow system standards.
+    *   **Personas:** Create custom AI experts (Coder, Writer, etc.).
+    *   **User Profile:** Personalize responses with your name and role.
 
-## Setup & Run
-1.  **Install Dependencies:**
+## 📦 Installation
+
+### Prerequisites
+1.  **Ollama**: Install [Ollama](https://ollama.com/) and pull a model:
     ```bash
-    ./venv/bin/pip install -r requirements.txt
+    ollama pull llama3.2
     ```
-    (Already done if you followed the setup)
-
-2.  **Run:**
+2.  **System Dependencies**:
     ```bash
-    ./run.sh
+    sudo apt install python3-venv xclip notify-send
     ```
 
-3.  **Usage:**
-    - Press `Super+Space` to show the window.
-    - Type or speak.
-    - Press `Esc` to hide.
+### Setup
+1.  Clone and run the installer:
+    ```bash
+    git clone https://github.com/your-username/AIRA.git
+    cd AIRA
+    ./install.sh
+    ```
 
-## Troubleshooting
-- **Microphone:** Ensure `pyaudio` dependencies are met. On Debian/Ubuntu: `sudo apt install python3-pyaudio portaudio19-dev`.
-- **Hotkeys:** If `Super+Space` doesn't work (common on Wayland), use the System Tray icon to show/hide.
+## 🖥️ Usage
+
+*   **Toggle:** `Super+Space`
+*   **Index Folder:** Right-click a folder in your file manager -> "AIRA: Index this Folder"
+*   **Settings:** Click the ⚙️ icon to manage personas, history, and themes.
+
+## 🛠️ Project Structure
+
+```text
+├── src/                  # Source Code
+│   ├── core/             # AI logic, DB, and Memory
+│   ├── ui/               # PyQt6 Interface & Themes
+│   └── tools/            # System & Web integration
+├── scripts/              # Integration & CLI scripts
+├── docs/                 # Documentation
+├── icons/                # Assets
+└── requirements.txt      # Dependencies
+```
+
+## 📜 License
+MIT License. See [LICENSE](LICENSE) for details.

@@ -5,96 +5,23 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QIcon, QAction, QPainter, QBrush, QPalette, QDragEnterEvent, QDropEvent
 import markdown
 import uuid
-
-class ToolBlock(QFrame):
-    def __init__(self, name, result, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 2, 10, 2)
-        self.layout.setSpacing(5)
-        
-        icon = "🧠" if "Memory" in name else "🔍"
-        self.btn = QPushButton(f"  {icon} {name}  ")
-        self.btn.setCheckable(True)
-        self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn.clicked.connect(self.toggle_details)
-        
-        self.details = QLabel(str(result))
-        self.details.setWordWrap(True)
-        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.details.setVisible(False)
-        
-        self.apply_styles()
-        self.layout.addWidget(self.btn, alignment=Qt.AlignmentFlag.AlignLeft)
-        self.layout.addWidget(self.details)
-
-    def apply_styles(self):
-        palette = QApplication.palette()
-        highlight = palette.color(QPalette.ColorRole.Highlight).name()
-        base = palette.color(QPalette.ColorRole.Base).name()
-        text = palette.color(QPalette.ColorRole.Text).name()
-        
-        self.btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #4C566A;
-                color: #ECEFF4;
-                border-radius: 12px;
-                padding: 5px 15px;
-                font-size: 12px;
-                font-weight: bold;
-                border: 1px solid {highlight};
-            }}
-            QPushButton:checked {{ background-color: {highlight}; color: white; }}
-            QPushButton:hover {{ background-color: {highlight}; border: 1px solid white; }}
-        """)
-        
-        self.details.setStyleSheet(f"""
-            QLabel {{
-                background-color: {base};
-                color: {text};
-                border: 1px dashed {highlight};
-                border-radius: 8px;
-                padding: 12px;
-                font-family: monospace;
-                font-size: 11px;
-            }}
-        """)
-
-    def toggle_details(self):
-        self.details.setVisible(self.btn.isChecked())
-
-class MessageWidget(QWidget):
-    def __init__(self, sender, text, is_markdown=False, parent=None):
-        super().__init__(parent)
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(5, 5, 5, 5)
-        
-        palette = QApplication.palette()
-        color = palette.color(QPalette.ColorRole.Highlight).name() if sender == "You" else palette.color(QPalette.ColorRole.Link).name()
-        
-        self.label = QLabel(f"<b style='color:{color}'>{sender}:</b>")
-        self.content = QLabel()
-        self.content.setWordWrap(True)
-        self.content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        
-        if is_markdown:
-            html = markdown.markdown(text, extensions=['fenced_code', 'codehilite', 'nl2br'])
-            self.content.setText(f"<div style='color:{palette.color(QPalette.ColorRole.Text).name()}'>{html}</div>")
-        else:
-            self.content.setText(text)
-            
-        self.layout.addWidget(self.label)
-        self.layout.addWidget(self.content)
+from src.ui.widgets import ToolBlock, MessageWidget
+from src.ui.settings_window import SettingsWindow
+from src.ui.theme import ThemeManager
+from src.core.config import Config
+from src.core.models import Message
 
 class ChatWindow(QMainWindow):
     submit_signal = pyqtSignal(str)
-    voice_signal = pyqtSignal()
+    voice_signal = pyqtSignal() # Kept for potential future use or signal compatibility
     clear_signal = pyqtSignal()
     model_changed = pyqtSignal(str)
     persona_changed = pyqtSignal(str)
+    session_changed = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
+        self.config = Config.load()
         self.setWindowTitle("AIRA")
         self.setWindowIcon(QIcon("icons/aira.svg"))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -127,7 +54,9 @@ class ChatWindow(QMainWindow):
         self.input_field.setFont(font)
         self.input_layout.addWidget(self.input_field)
 
-        self.persona_button = QPushButton("👤")
+        self.persona_button = QPushButton()
+        self.persona_button.setIcon(QIcon("icons/persona.svg"))
+        self.persona_button.setIconSize(QSize(24, 24))
         self.persona_button.setFixedSize(32, 32)
         self.persona_button.setFlat(True)
         self.persona_menu = QMenu(self.persona_button)
@@ -135,14 +64,17 @@ class ChatWindow(QMainWindow):
         self.populate_personas()
         self.input_layout.addWidget(self.persona_button)
 
-        self.settings_button = QPushButton("⚙")
+        self.settings_button = QPushButton()
+        self.settings_button.setIcon(QIcon("icons/settings.svg"))
+        self.settings_button.setIconSize(QSize(24, 24))
         self.settings_button.setFixedSize(32, 32)
         self.settings_button.setFlat(True)
-        self.settings_menu = QMenu(self.settings_button)
-        self.settings_button.setMenu(self.settings_menu)
+        self.settings_button.clicked.connect(self.open_settings)
         self.input_layout.addWidget(self.settings_button)
 
-        self.clear_button = QPushButton("⟳")
+        self.clear_button = QPushButton()
+        self.clear_button.setIcon(QIcon("icons/clear.svg"))
+        self.clear_button.setIconSize(QSize(24, 24))
         self.clear_button.setFixedSize(32, 32)
         self.clear_button.setFlat(True)
         self.clear_button.clicked.connect(self.handle_clear)
@@ -167,21 +99,72 @@ class ChatWindow(QMainWindow):
         self.apply_styles()
         self.center_on_screen()
 
-    def populate_personas(self):
-        personas = {"Default": "DEFAULT", "Code Expert": "You are a code expert...", "Writer": "You are a creative writer...", "Concise": "Be extremely concise.", "Tutor": "Explain like I'm five."}
-        for name, p in personas.items():
-            action = QAction(name, self.persona_menu)
-            action.triggered.connect(lambda checked, val=p: self.persona_changed.emit(val))
-            self.persona_menu.addAction(action)
+        self.settings_window = None
+
+    def open_settings(self):
+        if not self.settings_window:
+            self.settings_window = SettingsWindow(self)
+            self.settings_window.settings_changed.connect(self.reload_config)
+            self.settings_window.session_selected.connect(self.session_changed.emit)
+        self.settings_window.show()
+
+    def reload_config(self):
+        self.config = Config.load()
+        self.populate_personas()
+        # Apply theme style live
+        self.setStyleSheet(ThemeManager.get_style(self.config.get("theme", "System")))
 
     def update_models(self, models, active_model):
-        self.settings_menu.clear()
-        for model in models:
-            action = QAction(model, self.settings_menu)
-            action.setCheckable(True); action.setChecked(model == active_model)
-            action.triggered.connect(lambda checked, m=model: self.model_changed.emit(m))
-            self.settings_menu.addAction(action)
+        self.models = models # Store for menu population
+        self.active_model = active_model
         self.input_field.setPlaceholderText(f"Ask AI ({active_model})...")
+        self.populate_personas() # Refresh menu to include models
+
+    def populate_personas(self):
+        self.persona_menu.clear()
+        
+        # Personas Section
+        personas = self.config.get("personas", {})
+        for name, prompt in personas.items():
+            action = QAction(name, self.persona_menu)
+            action.triggered.connect(lambda checked, val=prompt: self.persona_changed.emit(val))
+            self.persona_menu.addAction(action)
+            
+        self.persona_menu.addSeparator()
+        
+        # Models Section (Submenu)
+        model_menu = self.persona_menu.addMenu("Models")
+        if hasattr(self, 'models'):
+            for model in self.models:
+                action = QAction(model, model_menu)
+                action.setCheckable(True)
+                action.setChecked(model == self.active_model)
+                action.triggered.connect(lambda checked, m=model: self.model_changed.emit(m))
+                model_menu.addAction(action)
+
+    def load_history(self, history):
+        if not history: return
+        self.scroll.setVisible(True)
+        self.animate_expansion(True)
+        
+        # Add visual separator for new session
+        # self.chat_layout.addWidget(QLabel("--- Previous Session ---"))
+        
+        for msg in history:
+            role = msg.role
+            content = msg.content
+            if not content: continue
+            
+            if role == 'user':
+                self.add_message("You", content)
+            elif role == 'assistant':
+                # Render full markdown for assistant messages immediately
+                ui_msg = self.add_message("AI", "")
+                html = markdown.markdown(content, extensions=['fenced_code', 'codehilite', 'nl2br'])
+                ui_msg.content.setText(f"<div style='color:{QApplication.palette().color(QPalette.ColorRole.Text).name()}'>{html}</div>")
+            elif role == 'tool':
+                # Optionally restore tool outputs? For now, skip to keep cleaner
+                pass
 
     def handle_submit(self):
         text = self.input_field.text().strip()
@@ -194,7 +177,8 @@ class ChatWindow(QMainWindow):
     def animate_expansion(self, expand):
         target = 550 if expand else 60
         self.animation = QPropertyAnimation(self, b"maximumHeight")
-        self.animation.setDuration(400); self.animation.setEasingCurve(QEasingCurve.Type.OutQuart)
+        self.animation.setDuration(150) # Faster animation
+        self.animation.setEasingCurve(QEasingCurve.Type.OutQuart)
         self.animation.setStartValue(self.height()); self.animation.setEndValue(target)
         self.animation.valueChanged.connect(lambda val: self.setFixedHeight(val))
         self.animation.start()
@@ -215,8 +199,13 @@ class ChatWindow(QMainWindow):
             line.setStyleSheet("background-color: #4C566A; margin: 10px 0;")
             self.chat_layout.insertWidget(self.chat_layout.count() - 1, line)
             self.current_ai_msg = self.add_message("AI", "")
+        
         self.current_response_buffer += text
-        self.current_ai_msg.content.setText(self.current_response_buffer)
+        
+        # Render Markdown incrementally
+        html = markdown.markdown(self.current_response_buffer, extensions=['fenced_code', 'codehilite', 'nl2br'])
+        self.current_ai_msg.content.setText(f"<div style='color:{QApplication.palette().color(QPalette.ColorRole.Text).name()}'>{html}</div>")
+        
         self.scroll_to_bottom()
 
     def finish_response(self, full_text):
@@ -230,10 +219,13 @@ class ChatWindow(QMainWindow):
         QApplication.processEvents()
         self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum())
 
-    def handle_clear(self):
+    def chat_layout_clear(self):
         while self.chat_layout.count() > 1:
             item = self.chat_layout.takeAt(0); 
             if item.widget(): item.widget().deleteLater()
+
+    def handle_clear(self):
+        self.chat_layout_clear()
         self.reset_window(); self.clear_signal.emit()
         self.show(); self.activateWindow(); self.input_field.setFocus()
 
@@ -242,16 +234,6 @@ class ChatWindow(QMainWindow):
     def toggle_visibility(self):
         if self.isVisible(): self.hide(); self.reset_window()
         else: self.show(); self.activateWindow(); self.input_field.setFocus(); self.center_on_screen()
-
-    def toggle_visibility(self):
-        if self.isVisible():
-            self.hide()
-            self.reset_window()
-        else:
-            self.show()
-            self.activateWindow()
-            self.input_field.setFocus()
-            self.center_on_screen()
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls(): event.acceptProposedAction()
